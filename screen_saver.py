@@ -5,8 +5,9 @@ import os
 import random
 import re
 import time
-
+import dxcam
 import cv2
+import easyocr
 import keyboard
 import mss
 import numpy as np
@@ -73,9 +74,8 @@ def distance(coords1, coords2):
     return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
 
 
-def take_screenshot(resize=True, rectangle_corners=None):
+def backup_screenshot(resize=True, rectangle_corners=None):
     # Capture a screenshot
-    # screenshot = pyautogui.screenshot( region=(app_window.left, app_window.top + toolbar_height, app_window.width, app_window.height-toolbar_height))
     if not rectangle_corners:
         monitor = {"top": app_window.top + toolbar_height, "left": app_window.left, "width": app_window.width,
                    "height": app_window.height - toolbar_height}
@@ -89,6 +89,28 @@ def take_screenshot(resize=True, rectangle_corners=None):
         screenshot = np.array(sct.grab(monitor))[:, :, :3]
     if resize:
         screenshot = cv2.resize(np.array(screenshot), (0, 0), fx=scale_factor, fy=scale_factor)
+    return screenshot
+
+
+def take_screenshot(resize=True, rectangle_corners=None):
+    if not rectangle_corners:
+        monitor = (app_window.left, app_window.top + toolbar_height,
+                   app_window.width, app_window.height - toolbar_height)
+    else:
+        left = app_coords[0] + rectangle_corners[0][0]
+        top = app_coords[1] + rectangle_corners[0][1]
+        width = rectangle_corners[1][0] - rectangle_corners[0][0]
+        height = rectangle_corners[1][1] - rectangle_corners[0][1]
+        monitor = (left, top, left + width, top + height)
+
+    screenshot = camera.grab(region=monitor)
+    # Convert to numpy array and RGB format
+    screenshot = np.array(screenshot)
+    if screenshot.dtype == "object":
+        return backup_screenshot(resize, rectangle_corners)
+
+    if resize:
+        screenshot = cv2.resize(screenshot, (0, 0), fx=scale_factor, fy=scale_factor)
 
     return screenshot
 
@@ -112,11 +134,11 @@ def current_time():
 
 
 def prop_width(number: int):
-    return int(number * app_size[0] / 556)
+    return int(number * (app_size[0] / 556))
 
 
 def prop_height(number: int):
-    return int(number * app_size[1] / 1019)
+    return int(number * (app_size[1] / 1019))
 
 
 def get_elixir():
@@ -160,8 +182,8 @@ def update_crowns():
         rectangle_corners=((prop_width(45), prop_height(180)), (prop_width(490), prop_height(750))))
 
     # Find the location of the template image in the screenshot
-    location1 = find_image_in_screenshot(image_to_find1, app_window_screenshot)
-    location2 = find_image_in_screenshot(image_to_find2, app_window_screenshot)
+    location1 = find_image_in_screenshot(blue_three_crown_image, app_window_screenshot)
+    location2 = find_image_in_screenshot(red_three_crown_image, app_window_screenshot)
 
     if location1:
         return 2
@@ -223,6 +245,7 @@ def update_crowns():
                 if partie.tours_bleu == 1:
                     partie.pv_tours_bleu[3] = None
                     partie.pv_tours_bleu[4] = None
+
                 break
     if partie.tours_bleu == 2:
         tower_base_boxes = [((381, 618), (458, 685)), ((94, 618), (173, 685))]
@@ -264,7 +287,7 @@ def start_battle():
     location = find_image_in_screenshot(friends_icon, app_window_screenshot)
 
     if location:
-        print("Icone d'amis trouvé, démarrage du combat...")
+        print("Friends icon found, starting battle...")
         time.sleep(0.1)
         pyautogui.click(app_coords[0] + prop_width(519), app_coords[1] + prop_height(139))
         time.sleep(0.1)
@@ -283,8 +306,8 @@ def start_battle():
 
             # Find the location of the template image in the screenshot
             location = find_image_in_screenshot(blason_de_combat, app_window_screenshot)
-            time.sleep(0.1)
-        time.sleep(2.3)
+        print("battle crest found")
+        time.sleep(2.2)
         partie.chrono = 175
         partie.timer = time.time()
         elixir = get_elixir()
@@ -330,19 +353,9 @@ def exit_battle():
             location = find_image_in_screenshot(image_to_find, app_window_screenshot)
 
 
-def find_troops(screenshot, show=False):
-    results: Results = model.predict(source=screenshot, stream=True, conf=0.6)
+def find_troops(screenshot):
+    results: Results = model.predict(source=screenshot, stream=True, conf=0.4)
     for result in results:
-        if show:
-            # Plot the result on the screenshot
-            im_array = result.plot()
-
-            # converts the image to an opencv image
-            image = np.array(im_array)
-
-            # Display the image using OpenCV
-            cv2.imshow("YOLOv8 Inference", image)
-            cv2.waitKey(1)
         detections = []
         results_json = result.tojson()
         try:
@@ -364,7 +377,7 @@ def find_troops(screenshot, show=False):
             # print(str(item['name']), box['x1'], box['x2'], (box['x1']* opposite_scale_factor + box['x2']* opposite_scale_factor) / 2)
 
             detections.append((item['name'], (center_x, center_y)))
-        return detections
+        return detections, result
 
 
 def clean_string(input_string):
@@ -392,8 +405,10 @@ def parse_image(i, coord):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         thresholded = cv2.bitwise_not(gray)
 
-        text = pytesseract.image_to_string(thresholded, config='--psm 13')
-        text = clean_string(text)
+        numbers = []
+        text = reader.readtext(thresholded)[0][1]
+
+        #text = clean_string(text)
 
         if text == '' or text == " ":
             return None, None
@@ -418,8 +433,8 @@ def filter_not_none(item):
 
 
 def detect_tower_hp():
-    coords = [((401, 169), (436, 186)), ((110, 169), (145, 186)), ((282, 46), (331, 69)),
-              ((401, 636), (449, 654)), ((111, 637), (159, 653)), ((279, 777), (329, 796))]
+    coords = [((401, 166), (436, 190)), ((110, 166), (145, 190)), ((282, 46), (331, 69)),
+              ((401, 640), (449, 660)), ((111, 640), (159, 660)), ((279, 777), (329, 796))]
     coords = [((prop_width(x1), prop_height(y1)), (prop_width(x2), prop_height(y2))) for (x1, y1), (x2, y2) in coords]
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -446,19 +461,16 @@ def place_card(card_slot_index, pos):
 def get_current_cards():
     for i in range(4):
         card_slot = take_screenshot(rectangle_corners=card_slot_boxes[i])
-        for card in all_cards:
-            card_image = load_image(f"images/cards/{card}.png")
+        for card, card_image in preloaded_card_icons.items():
             if find_image_in_screenshot(card_image, card_slot):
                 partie.cartes_en_main[i] = card
                 break
 
-    next_card_slot = take_screenshot(rectangle_corners=next_card_slot_box)
-    for card in all_cards:
-        card_image = load_image(f"images/cards/{card}.png")
-        card_image = cv2.resize(card_image, (0, 0), fx=0.45, fy=0.45)
-        if find_image_in_screenshot(card_image, next_card_slot):
-            partie.prochaine_carte = card
-            break
+    # next_card_slot = take_screenshot(rectangle_corners=next_card_slot_box)
+    # for card, card_image in preloaded_card_icons.items():
+    #     if find_image_in_screenshot(card_image, next_card_slot):
+    #         partie.prochaine_carte = card
+    #         break
 
 
 def find_optimal_center(coordinates, radius):
@@ -476,10 +488,11 @@ def find_optimal_center(coordinates, radius):
 
     return max_center, max_count
 
+
 def blue_tower_index(side):
-    if side=="left":
+    if side == "left":
         return 3
-    elif side=="right":
+    elif side == "right":
         return 4
     else:
         raise ValueError("Invalid side")
@@ -548,7 +561,7 @@ def bot(enemy_troops, ally_troops):
         else:
             plan = "attack"
             print("Mode: Attack")
-            print("enemy troops : ",attacking_enemy_troops)
+            print("enemy troops : ", attacking_enemy_troops)
 
         # do for any plan
         if plan:
@@ -567,7 +580,8 @@ def bot(enemy_troops, ally_troops):
                     place_card(cards_in_hand.index(current_win_conditions[0]), BLUE_BRIDGE_COORDS[target_tower])
                     place_card(cards_in_hand.index(current_support_cards[0]),
                                (BLUE_BRIDGE_COORDS[target_tower][0], BLUE_BRIDGE_COORDS[target_tower][1] + 15))
-                    print(f"Placing combo {current_win_conditions[0].split('ally_')[1]} and {current_support_cards[0].split('ally_')[1]} to push.")
+                    print(
+                        f"Placing combo {current_win_conditions[0].split('ally_')[1]} and {current_support_cards[0].split('ally_')[1]} to push.")
                 elif current_cycle_cards:
                     place_card(cards_in_hand.index(current_cycle_cards[0]), BLUE_BACK_COORDS[target_tower])
                     print(f"Placing {current_cycle_cards[0].split('ally_')[1]} to cycle.")
@@ -581,7 +595,8 @@ def bot(enemy_troops, ally_troops):
             closest_troop_coord = None
             for troop in attacking_enemy_troops:
                 troop_coord = enemy_troops["all"][1][enemy_troops["all"][0].index(troop)]
-                tower_distance = distance(partie.position_tours_bleu[blue_tower_index(get_side(troop_coord[0]))], troop_coord)
+                tower_distance = distance(partie.position_tours_bleu[blue_tower_index(get_side(troop_coord[0]))],
+                                          troop_coord)
                 if closest_distance is not None:
                     if tower_distance < closest_distance:
                         troop_to_defend = troop
@@ -614,11 +629,16 @@ def bot(enemy_troops, ally_troops):
                 no_one_already_defending = False
 
             if no_one_already_defending:
-                if distance(partie.position_tours_bleu[blue_tower_index(get_side(pos_giant[0]))], pos_giant) > TILE_SIZE * 5 and "ally_goblin_cage" in cards_in_hand and partie.elixir_bleu >= 4 and ("enemy_giant" in enemy_troops["all"][0] or "enemy_prince" in enemy_troops["all"][0] or "enemy_mini_pekka" in enemy_troops["all"][0]):
+                if distance(partie.position_tours_bleu[blue_tower_index(get_side(pos_giant[0]))],
+                            pos_giant) > TILE_SIZE * 5 and "ally_goblin_cage" in cards_in_hand and partie.elixir_bleu >= 4 and (
+                        "enemy_giant" in enemy_troops["all"][0] or "enemy_prince" in enemy_troops["all"][
+                    0] or "enemy_mini_pekka" in enemy_troops["all"][0]):
                     place_card(cards_in_hand.index("ally_goblin_cage"), BLUE_MIDDLE_COORDS)
                     print(f"Défending with {pos_giant} with Goblin Cage")
                 else:
-                    if "ally_mini_pekka" in cards_in_hand and partie.elixir_bleu >= 4 and ("enemy_giant" in enemy_troops["all"][0] or "enemy_prince" in enemy_troops["all"][0] or "enemy_mini_pekka" in enemy_troops["all"][0]):
+                    if "ally_mini_pekka" in cards_in_hand and partie.elixir_bleu >= 4 and (
+                            "enemy_giant" in enemy_troops["all"][0] or "enemy_prince" in enemy_troops["all"][
+                        0] or "enemy_mini_pekka" in enemy_troops["all"][0]):
                         place_card(cards_in_hand.index("ally_mini_pekka"),
                                    (pos_giant[0], pos_giant[1] + int(TILE_SIZE * 2)))
                         print("Défending Giant with Mini Pekka")
@@ -629,12 +649,16 @@ def bot(enemy_troops, ally_troops):
                     elif "ally_archer" in cards_in_hand and partie.elixir_bleu >= 3:
                         place_card(cards_in_hand.index("ally_archer"),
                                    (pos_giant[0], pos_giant[1] + int(TILE_SIZE * 2)))
-                        print("Défending Giant with Mini Pekka")
+                        print("Defending Giant with Mini Pekka")
 
 
 app_window = gw.getWindowsWithTitle('LDPlayer')[0]
-# shows app coords
-print(f"Ready! (x={app_window.left}, y={app_window.top}) and (width={app_window.width}, height={app_window.height})")
+try:
+    if app_window.isMinimized:
+        app_window.restore()
+    app_window.activate()
+except:
+    pass
 app_coords = (app_window.left, app_window.top)
 app_size = (app_window.width, app_window.height)
 scale_factor = 1
@@ -651,10 +675,12 @@ numbers_images = [cv2.imread("images/battle/un_bleu.png"), cv2.imread("images/ba
 
 card_slots_positions = [(prop_width(177), prop_height(913)), (prop_width(277), prop_height(913)),
                         (prop_width(377), prop_height(913)), (prop_width(477), prop_height(913))]
+
 card_slot_boxes = [((prop_width(125), prop_height(848)), (prop_width(221), prop_height(971))),
                    ((prop_width(229), prop_height(848)), (prop_width(325), prop_height(971))),
                    ((prop_width(333), prop_height(848)), (prop_width(429), prop_height(971))),
                    ((prop_width(437), prop_height(848)), (prop_width(533), prop_height(971)))]
+
 next_card_slot_box = ((prop_width(25), prop_height(948)), (prop_width(74), prop_height(1008)))
 all_cards = ["ally_knight", "ally_archer", "ally_prince", "ally_goblin", "ally_spear_goblin", "ally_giant",
              "ally_mini_pekka", "ally_minion", "ally_arrow", "ally_fireball", "ally_goblin_cage", "ally_musketeer",
@@ -679,8 +705,8 @@ cycle_cards = ["ally_archer", "ally_spear_goblin", "ally_goblin", "ally_knight"]
 buildings = ["ally_goblin_cage", "ally_goblin_hut"]
 support_cards = ["ally_archer", "ally_minion", "ally_spear_goblin", "ally_goblin"]
 
-image_to_find1 = load_image('images/battle/three_crown_blue.png')
-image_to_find2 = load_image('images/battle/three_crown_red.png')
+blue_three_crown_image = load_image('images/battle/three_crown_blue.png')
+red_three_crown_image = load_image('images/battle/three_crown_red.png')
 friends_icon = load_image('images/battle/friends_icon.png')
 blason_de_combat = load_image('images/battle/vs_blason_debut_de_combat.png')
 exit_battle_red_cross_button = load_image('images/battle/exit_battle_red_cross_button.png')
@@ -690,6 +716,11 @@ BLUE_MIDDLE_COORDS = (prop_width(265), prop_height(560))
 BLUE_BRIDGE_COORDS = {"left": (prop_width(128), prop_height(438)), "right": (prop_width(419), prop_height(457))}
 BLUE_BACK_COORDS = {"left": (prop_width(47), prop_height(750)), "right": (prop_width(502), prop_height(751))}
 
+preloaded_card_icons = {card: load_image(f"images/cards/{card}.png") for card in all_cards}
+camera = dxcam.create(output_color="BGR")
+reader = easyocr.Reader(['en'])
+
+print(f"Ready! (x={app_window.left}, y={app_window.top}) and (width={app_window.width}, height={app_window.height})")
 
 def start():
     mode = None
@@ -697,61 +728,16 @@ def start():
     recording = False
     record_number = 0
     live_detection = False
-
+    start_time = None
+    fps_start_time = time.time()
+    frame_count = 0
     while True:
-        if mode != "battle" and keyboard.is_pressed('&'):  # 1
+        #1 exit
+        if keyboard.is_pressed('&'):  # 1
             exit()
-        elif mode != "battle" and keyboard.is_pressed('é'):  # 2
-            mode = "single_screenshot"
-        elif mode != "battle" and keyboard.is_pressed('"') and app_window.isActive:  # 3
-            mode = "start_battle"
-        elif mode != "battle" and keyboard.is_pressed("'") and app_window.isActive:  # 4
-            mode = "force_start_battle"
-        elif mode != "battle" and keyboard.is_pressed("(") and app_window.isActive:  # 5
-            if recording:
-                recording = False
-                print("stopped recording")
-                time.sleep(0.5)
-            else:
-                recording = True
-                record_number = 0
-                recording_date = current_time()
-                print("started recording")
-                # create folder of the date:
-                if not os.path.exists(f"images/recording/{recording_date}"):
-                    os.makedirs(f"images/recording/{recording_date}")
-                time.sleep(0.1)
-        elif mode != "battle" and keyboard.is_pressed("-") and app_window.isActive:  # 6
-            if live_detection:
-                live_detection = False
-                print("stopped detecting")
-                time.sleep(0.1)
-            else:
-                live_detection = True
-                print("started detecting")
-                time.sleep(0.1)
 
-        if mode != "battle" and win32api.GetKeyState(0x02) < 0 and app_window.isActive:
-            print("prop_width(", pyautogui.position().x - app_coords[0], ")", "prop_height(",
-                  pyautogui.position().y - app_coords[1], ")")
-            time.sleep(0.1)
-        # check if middle click if yes, print current time minus timer
-        if mode != "battle" and win32api.GetKeyState(0x04) < 0 and app_window.isActive:
-            if timer:
-                print(time.time() - timer)
-
-                timer = None
-            else:
-                timer = time.time()
-                print("timer started")
-
-            # x,y = pyautogui.position().x, pyautogui.position().y
-            # pixel_color = pyautogui.pixel(x, y)
-            # print(f"RGB Color at ({x}, {y}): {pixel_color}")
-
-            time.sleep(0.1)
-
-        if mode != "battle" and mode == "single_screenshot":
+        #2 screenshot
+        elif keyboard.is_pressed('é'):  # 2
             ss_mode = "multiple"
             if ss_mode == "single":
                 current_date = current_time()
@@ -768,10 +754,11 @@ def start():
                 mode = None
                 time.sleep(0.5)
             if ss_mode == "multiple":
-                coords = [((401, 169), (436, 186)), ((110, 169), (145, 186)), ((279, 777), (329, 796)),
-                          ((282, 46), (331, 69)), ((401, 636), (449, 654)), ((111, 637), (159, 653))]
+                coords = [((401, 162), (450, 185)), ((111, 162), (155, 185)), ((282, 46), (331, 69)),
+                          ((401, 644), (450, 662)), ((111, 644), (155, 662)), ((279, 777), (329, 796))]
                 coords = [((prop_width(x1), prop_height(y1)), (prop_width(x2), prop_height(y2))) for (x1, y1), (x2, y2)
                           in coords]
+                print(coords)
 
                 for coord in coords:
                     current_date = current_time()
@@ -787,6 +774,62 @@ def start():
                     print()
                     mode = None
                     time.sleep(0.1)
+
+        #3 Start battle
+        elif mode != "battle" and keyboard.is_pressed('"') and app_window.isActive:  # 3
+            mode = "start_battle"
+
+        #4 Force Start battle
+        elif mode != "battle" and keyboard.is_pressed("'") and app_window.isActive:  # 4
+            mode = "force_start_battle"
+
+        #5 toggle recording
+        elif keyboard.is_pressed("(") and app_window.isActive:  # 5
+            if recording:
+                recording = False
+                print("stopped recording")
+                time.sleep(0.5)
+            else:
+                recording = True
+                record_number = 0
+                recording_date = current_time()
+                print("started recording")
+                # create folder of the date:
+                if not os.path.exists(f"images/recording/{recording_date}"):
+                    os.makedirs(f"images/recording/{recording_date}")
+                time.sleep(0.1)
+
+        #6 toggle live detection
+        elif keyboard.is_pressed("-") and app_window.isActive:
+            if live_detection:
+                live_detection = False
+                print("stopped detecting")
+                time.sleep(0.1)
+            else:
+                live_detection = True
+                print("started detecting")
+                time.sleep(0.1)
+
+
+        if mode != "battle" and win32api.GetKeyState(0x02) < 0 and app_window.isActive:
+            print("prop_width(", pyautogui.position().x - app_coords[0], ")", "prop_height(",
+                  pyautogui.position().y - app_coords[1], ")")
+            time.sleep(0.1)
+
+        if mode != "battle" and win32api.GetKeyState(0x04) < 0 and app_window.isActive:
+            if timer:
+                print(time.time() - timer)
+
+                timer = None
+            else:
+                timer = time.time()
+                print("timer started")
+
+            # x,y = pyautogui.position().x, pyautogui.position().y
+            # pixel_color = pyautogui.pixel(x, y)
+            # print(f"RGB Color at ({x}, {y}): {pixel_color}")
+
+            time.sleep(0.1)
 
         elif mode != "battle" and (mode == "start_battle" or mode == "force_start_battle"):
             if start_battle() or mode == "force_start_battle":
@@ -809,10 +852,22 @@ def start():
             # record_number = 0
             # current_date = current_time()
             # print("started recording")
+
         if mode == "battle":
-            print("Loop")
-            all_troops = find_troops(
+
+            start = time.time()
+            partie.elixir_bleu = get_elixir()
+            get_elixir_time = time.time() - start
+
+            #print("Loop")
+            # 1. Finding troops
+            start = time.time()
+            found_troops = find_troops(
                 take_screenshot(rectangle_corners=((0, 0), (app_size[0], app_size[1] - prop_height(200)))))
+            find_troops_time = time.time() - start
+
+            start = time.time()
+            all_troops = found_troops[0]
             troops = {"left": ([], []), "right": ([], []), "all": ([], [])}
             ally_troops = {"left": ([], []), "right": ([], []), "all": ([], [])}
             for troop in all_troops:
@@ -834,6 +889,7 @@ def start():
                         ally_troops["right"][1].append(troop[1])
                     ally_troops["all"][0].append(troop[0])
                     ally_troops["all"][1].append(troop[1])
+            process_troops_time = time.time() - start
 
             # if partie.elixir_bleu > 10:
             #     partie.elixir_bleu = 10
@@ -853,31 +909,32 @@ def start():
             #     partie.elixir_timer_rouge = time.time() - ((time.time() - partie.elixir_timer_rouge) % partie.elixir_cooldown)+0.2
             # elif partie.elixir_rouge >= 10:
             #     partie.elixir_timer_rouge = time.time()+0.2
-            partie.elixir_bleu = get_elixir()
 
+            start = time.time()
             crowns_status = update_crowns()
+            update_crowns_time = time.time() - start
             # print(partie.tours_bleu, partie.tours_rouge)
             if crowns_status == 2:
-                print("partie finie par victoire bleu")
+                print("Game ended with blue victory")
                 mode = None
                 continue
             if crowns_status == 3:
-                print("partie finie par victoire rouge")
+                print("Game ended with red victory")
                 mode = None
                 continue
 
             if crowns_status:
-                print("bleu", partie.tours_bleu, "rouge", partie.tours_rouge)
+                print("blue", partie.tours_bleu, "red", partie.tours_rouge)
                 if partie.tours_bleu == partie.tours_rouge:
-                    print("partie finie par égalité")
+                    print("Game ended by draw")
                     mode = None
                     continue
                 elif partie.tours_bleu > partie.tours_rouge:
-                    print("partie finie par victoire bleu")
+                    print("Game ended with blue victory")
                     mode = None
                     continue
                 elif partie.tours_bleu < partie.tours_rouge:
-                    print("partie finie par victoire rouge")
+                    print("Game ended with red victory")
                     mode = None
                     continue
 
@@ -898,25 +955,49 @@ def start():
                     else:
                         partie.overtime = False
                         if partie.tours_bleu == partie.tours_rouge:
-                            print("partie finie par égalité")
+                            print("Game ended with draw")
                             mode = None
                             continue
                         elif partie.tours_bleu > partie.tours_rouge:
-                            print("partie finie par victoire bleu")
+                            print("Game ended with blue victory")
                             mode = None
                             continue
                         elif partie.tours_bleu < partie.tours_rouge:
-                            print("partie finie par victoire rouge")
+                            print("Game ended with red victory")
                             mode = None
                             continue
 
                 # print(partie.chrono)
 
+            start = time.time()
             detect_tower_hp()
+            detect_tower_hp_time = time.time() - start
 
+            start = time.time()
             get_current_cards()
+            get_current_cards_time = time.time() - start
 
+            start = time.time()
             bot(troops, ally_troops)
+            bot_time = time.time() - start
+
+            # Log the performance times
+            print(f"find_troops: {find_troops_time:.4f} s")
+            print(f"get_elixir: {get_elixir_time:.4f} s")
+            print(f"process_troops: {process_troops_time:.4f} s")
+            print(f"update_crowns: {update_crowns_time:.4f} s")
+            print(f"detect_tower_hp: {detect_tower_hp_time:.4f} s")
+            print(f"get_current_cards: {get_current_cards_time:.4f} s")
+            print(f"bot: {bot_time:.4f} s")
+
+            # FPS Counter
+            frame_count += 1
+            if time.time() - fps_start_time >= 1:
+                fps = frame_count / (time.time() - fps_start_time)
+                print(f"FPS: {fps:.2f}")
+                fps_start_time = time.time()
+                frame_count = 0
+
         elif mode == "exit_battle":
             exit_battle()
             mode = None
@@ -936,7 +1017,44 @@ def start():
             app_window_screenshot = take_screenshot(
                 rectangle_corners=((0, 0), (app_size[0], app_size[1] - prop_height(200))))
 
-            find_troops(app_window_screenshot, True)
+            found_troops = find_troops(app_window_screenshot)
+            if True:
+                # Plot the result on the screenshot
+                im_array = found_troops[1].plot()
 
+                # converts the image to an opencv image
+                image = np.array(im_array)
+
+                cv2.putText(image, f"Elixir: {partie.elixir_bleu}", (prop_width(10), prop_height(790)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+                # shows name of every card in hand in top left corner, one line per card name
+                for i in range(4):
+                    cv2.putText(image, f"{partie.cartes_en_main[i]}", (prop_width(10), prop_height(10 + i * 20)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+                # # put a blue transparent rectangle over the blue placement area, the rectangle is transparent and we cann se the rest underneath it
+                # cv2.rectangle(image, partie.zone_placement_bleu[0][0], partie.zone_placement_bleu[0][1],
+                #               (255, 0, 0, 25), -1)
+
+                # in top right corner show in blue the number of blue crowns left and in red the number of red crowns left
+                cv2.putText(image, f"Tours bleu: {partie.tours_bleu}", (prop_width(770), prop_height(10)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+                cv2.putText(image, f"Tours rouge: {partie.tours_rouge}", (prop_width(770), prop_height(30)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
+
+                # Display the image using OpenCV
+                cv2.imshow("YOLOv8 Inference", image)
+                cv2.waitKey(1)
 
 start()
+# print("starting test")
+# start_time = time.time()
+# times = []
+# for i in range(100):
+#     print(i)
+#     take_screenshot(rectangle_corners=((0, 0), (app_size[0], app_size[1] - prop_height(200))))
+#     times.append(time.time() - start_time)
+#     start_time = time.time()
+# average = sum(times)/len(times)
+#
+# print("Average :", average)
