@@ -1,13 +1,16 @@
-Deck : Archères, Géant, Cage Gobeline, Flèches, Prince, Mini pekka, Chevalier, Goblins.
+Deck : Archères, Géant, Cage Gobeline, Flèches, Prince, Mini pekka, Chevalier, Minions.
 - quand les 3 tours sont restantes, cibler celle qui a le moins de troupes enemies de ce côté / qui est la plus faible.
 - Si une tour princesse a été détruite, attaquer l'autre tour princesse.
 - S'il y a une ou plusieurs troupes enemies ayant dépassé notre pont, passé en mode défense, sinon passé en mode attaque.
 - si on est en mode attaque :
-    - si on a au moins 8 d'élixir :
+    - si on a au moins 9 d'élixir :
         - si on a une "win condition" (géant ou prince ou mini_pekka) et un "support" (archers, minions, goblins à lance ou goblins) jouer le combo au pont.
         - sinon si on a une carte cycle, la placer dans le coin de la tour ciblée
 - Si on est en mode défense :
-    - si parmi les troupes enemies, il y a un géant ou unchvalier:
+    - si parmi les troupes enemies, il y a un géant ou un chvalier ou un mini pekka:
         - si on a cage gobeline et que géant n'est pas trop avancé, la jouer
         - sinon jouer, si possible, mini pekka ou gobelins ou archers
-- s'il détecte 3 troupes enemies ou + qui sont flèchables, utiliser les flèches dessus.
+    - si à la place les troupes enemies contienne un prince :
+        - si on a archers et/ou chevalier, placer au milieu
+        - si il est trop proche de la tour et que au milieu c'est trop loin, jouer mini pekka
+- s'il détecte 3 troupes enemies ou + qui sont flèchables (pas prince, géant, mini pekka ou chevalier), utiliser les flèches dessus.
