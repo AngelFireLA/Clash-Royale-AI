@@ -3,3 +3,11 @@
 /.idea
 test.py
 test2.py
+/yolo_training/runs
+/yolo_training/dataset
+/yolo_training/autoannotating
+/images/recording
+/images/single_ss
+model_artifacts.json
+roboflow_deploy.zip
+state_dict.pt
